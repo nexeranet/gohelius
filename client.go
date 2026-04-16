@@ -1,6 +1,7 @@
 package helius
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,7 +15,8 @@ import (
 )
 
 const (
-	BaseURL           = "https://api-mainnet.helius-rpc.com"
+	APIBaseURL        = "https://api-mainnet.helius-rpc.com"
+	APIBaseURLDevnet  = "https://api-devnet.helius-rpc.com"
 	RateLimitInterval = 200 * time.Millisecond // ~5 requests per second
 )
 
@@ -31,47 +33,55 @@ func New(apiKey string) *Client {
 			Timeout: 3 * time.Minute,
 		},
 		apiKey:  apiKey,
-		BaseURL: BaseURL,
+		BaseURL: APIBaseURL,
 		Limiter: rate.NewLimiter(rate.Every(RateLimitInterval), 1),
 	}
 }
 
-func (c *Client) call(ctx context.Context, path string, query url.Values, target any) error {
-	if err := c.Limiter.Wait(ctx); err != nil {
-		return err
-	}
-	if target == nil {
-		return errors.New("target is nil")
-	}
-
+func (c *Client) buildURL(path string, query url.Values) (string, error) {
 	fullURL := fmt.Sprintf("%s%s", c.BaseURL, path)
 	parsedURL, err := url.Parse(fullURL)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if query == nil {
 		query = url.Values{}
 	}
 	query.Set("api-key", c.apiKey)
 	parsedURL.RawQuery = query.Encode()
+	return parsedURL.String(), nil
+}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
+func (c *Client) doRequest(ctx context.Context, method, path string, query url.Values, reqBody io.Reader, target any) error {
+	if err := c.Limiter.Wait(ctx); err != nil {
+		return err
+	}
+
+	u, err := c.buildURL(path, query)
 	if err != nil {
 		return err
 	}
-	request.Header.Add("Content-Type", "application/json")
+	request, err := http.NewRequestWithContext(ctx, method, u, reqBody)
+	if err != nil {
+		return err
+	}
+	if reqBody != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 
 	response, err := c.client.Do(request)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = response.Body.Close()
-	}()
+	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("unexpected status code: %d, body: %s", response.StatusCode, string(body))
+	if response.StatusCode >= http.StatusMultipleChoices {
+		body, err := io.ReadAll(response.Body)
+		return fmt.Errorf("unexpected status code: %d, body: %s, io read err: %w", response.StatusCode, string(body), err)
+	}
+
+	if target == nil {
+		return nil
 	}
 
 	body, err := io.ReadAll(response.Body)
@@ -79,6 +89,21 @@ func (c *Client) call(ctx context.Context, path string, query url.Values, target
 		return err
 	}
 	return json.Unmarshal(body, target)
+}
+
+func (c *Client) call(ctx context.Context, path string, query url.Values, target any) error {
+	if target == nil {
+		return errors.New("target is nil")
+	}
+	return c.doRequest(ctx, http.MethodGet, path, query, nil, target)
+}
+
+func (c *Client) callWithBody(ctx context.Context, method, path string, body any, target any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return c.doRequest(ctx, method, path, nil, bytes.NewReader(data), target)
 }
 
 // GetTransactions returns parsed transaction history for a Solana wallet.

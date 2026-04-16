@@ -1,0 +1,23 @@
+
+# IDE
+.idea
+.vscode
+
+# Files
+.env
+
+# Folders
+.DS_Store
+docs
+tmp
+
+# Compiled Golang services
+cmd/**
+!cmd/**/
+!cmd/**/main.go
+!cmd/**/README.md
+!cmd/**/Dockerfile
+
+# Service configuration
+configs/*
+!configs/*.example.env
