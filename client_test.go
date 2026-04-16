@@ -14,7 +14,7 @@ func getTestClient(t *testing.T) *Client {
 	if apiKey == "" {
 		t.Skip("HELIUS_API_KEY not set")
 	}
-	return New(apiKey)
+	return New(apiKey, APIBaseURLDevnet)
 }
 
 func TestGetTransactions(t *testing.T) {

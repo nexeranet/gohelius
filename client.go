@@ -27,7 +27,10 @@ type Client struct {
 	Limiter *rate.Limiter
 }
 
-func New(apiKey string) *Client {
+func New(apiKey string, baseURL string) *Client {
+	if baseURL == "" {
+		baseURL = APIBaseURL
+	}
 	return &Client{
 		client: &http.Client{
 			Timeout: 3 * time.Minute,
